@@ -115,8 +115,8 @@ public class TFTPClient {
 				System.out.println(localErrors[3]);
 				return -4;
 			}
-			fileData = BytesUtils.removeTrailingZeros(fileData);
 			byte[] dataMsg = createDATA(fileData, blockN);
+
 			System.out.println("\nSending the #" + blockN + " block of " + dataLength + " bytes");
 			blockN++;
 			dp = new DatagramPacket(dataMsg, dataLength, serverIP, serverPort);
