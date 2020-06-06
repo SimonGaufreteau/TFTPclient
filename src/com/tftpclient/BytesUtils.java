@@ -1,5 +1,7 @@
 package com.tftpclient;
 
+import java.util.Arrays;
+
 public class BytesUtils {
 	private BytesUtils(){}
 
@@ -13,5 +15,13 @@ public class BytesUtils {
 		System.arraycopy(first, 0, result, 0, firstLen);
 		System.arraycopy(second, 0, result, firstLen, secondLen);
 		return result;
+	}
+
+
+	public static byte[] removeTrailingZeros(byte[] fileData) {
+		int i=fileData.length-1;
+		while(i>=0 && fileData[i]==0)
+			i--;
+		return Arrays.copyOf(fileData,i+1);
 	}
 }
