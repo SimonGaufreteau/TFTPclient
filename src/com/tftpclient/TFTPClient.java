@@ -18,9 +18,12 @@ public class TFTPClient {
 	}
 
 	//Error messages
-	private static final String[] serverErrors = {"Not defined, see error message (if any)","File not found.","Access violation (the host may have denied your request or you don't have the right to read/write the file).","Disk full or allocation exceeded.",
-			"Illegal TFTP operation.","Unknown transfer ID.","File already exists.","No such user."};
-	private static final String[] localErrors = {"Could not create the socket","Error encountered while trying to open the file","I/O error while sending/receiving a packet",
+	private static final String[] serverErrors = {"Not defined, see error message (if any)","File not found.",
+			"Access violation (the host may have denied your request or you don't have the right to read/write the file).",
+			"Disk full or allocation exceeded.", "Illegal TFTP operation.","Unknown transfer ID.",
+			"File already exists.","No such user."};
+	private static final String[] localErrors = {"Could not create the socket",
+			"Error encountered while trying to open the file","I/O error while sending/receiving a packet",
 			"Error encountered while trying to read the file","I/O error while closing the file reader"};
 
 	//Default write mode for the strings
