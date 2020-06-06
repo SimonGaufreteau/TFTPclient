@@ -1,6 +1,5 @@
 package com.tftpclient;
 
-import javax.xml.crypto.Data;
 import java.io.*;
 import java.math.BigInteger;
 import java.net.*;
@@ -10,12 +9,6 @@ import java.util.Arrays;
  * A class representing a TFTP client. The Pumpkin server is used to test the 2 primary methods : {@link #sendFile} and {@link #receiveFile}
  */
 public class TFTPClient {
-	// DATA
-	// 2 bytes : Opcode / 2 bytes : Block# / n bytes : Data (0 to 512 bytes)
-
-	// ACK
-	// 2 bytes : Opcode / 2 bytes : Block#
-
 	// ERROR
 	// 2 bytes : Opcode / 2 bytes : ErrorCode / string : ErrorMessage / 1 byte : 0
 
@@ -35,12 +28,26 @@ public class TFTPClient {
 	private static String defaultMode = "netascii";
 
 	//Default timeout value before sending the packet again : 1 min
-	private int defaultTimeout = 60000;
+	private static int defaultTimeout = 60000;
+
+	//Default IP adress
+	private static InetAddress defaultIP;
+	static {
+		try {
+			defaultIP = InetAddress.getByName("localhost");
+		} catch (UnknownHostException e) {
+			e.printStackTrace();
+		}
+	}
+
+	//Default server port
+	private static int defaultServerPort=69;
+
 
 	/**
 	 * Send a file to the server
 	 */
-	public void sendFile(InetAddress serverIP,int serverPort,String filePath) throws IOException {
+	public static void sendFile(InetAddress serverIP, int serverPort, String filePath) throws Exception {
 		//Creating the socket for the transmission
 		DatagramSocket sc = new DatagramSocket();
 		sc.setSoTimeout(defaultTimeout);
@@ -48,27 +55,74 @@ public class TFTPClient {
 		//Opening the file
 		File file = new File(filePath);
 		String fileName = file.getName();
-		BufferedReader br = new BufferedReader(new FileReader(file));
+		FileInputStream fs = new FileInputStream(file);
+
+		System.out.println("\n--------------------");
+		System.out.println("Starting TFTP request for : \""+fileName+"\"");
 
 		//Preparing to send the WRQ packet to the server
 		byte[] wrqMsg = createWRQ(fileName);
 		DatagramPacket dp = new DatagramPacket(wrqMsg,wrqMsg.length,serverIP,serverPort);
 
 		DatagramPacket resPacket = sendReceive(sc,dp);
+		byte[] resMsg = resPacket.getData();
 
+		//Checking an error
+		if(resMsg[1]!=opcode.ACK.value){
+			throwError(resMsg);
+		}
+		serverPort=resPacket.getPort();
+
+		//Creating the DATA packet
+		int blockN = 1;
+		int dataLength = 516;
+		byte[] fileData;
+		while(dataLength==516) {
+			fileData = new byte[512];
+			dataLength = fs.read(fileData, 0, 512)+4;
+			fileData = BytesUtils.removeTrailingZeros(fileData);
+			byte[] dataMsg = createDATA(fileData, blockN);
+			System.out.println("\nSending the #" + blockN + " block of " + dataLength + " bytes");
+			blockN++;
+			dp = new DatagramPacket(dataMsg, dataLength, serverIP, serverPort);
+			resPacket = sendReceive(sc, dp);
+			if (resPacket.getData()[1] != opcode.ACK.value) {
+				throwError(resPacket.getData());
+			}
+		}
+		//Terminating the communication
+		fs.close();
+		sc.close();
+		System.out.println("File \""+fileName+"\" sent successfully.");
+		System.out.println("--------------------\n");
 
 	}
 
-	/**
-	 * Sends a packet to the server and wait for the response.
-	 * @param sc The client's socket
-	 * @param dp Last packet sent
-	 * @return Response of the server
-	 */
-	private DatagramPacket sendReceive(DatagramSocket sc, DatagramPacket dp) throws IOException {
+
+
+
+	private static void throwError(byte[] resMsg) throws Exception {
+		throw new TFTPException(errors[resMsg[3]]);
+	}
+
+	public void sendFile(int serverPort,String filePath) throws Exception {
+		sendFile(defaultIP,serverPort,filePath);
+	}
+	public static void sendFile(String filePath) throws Exception {
+		sendFile(defaultIP,defaultServerPort,filePath);
+	}
+
+		/**
+		 * Sends a packet to the server and wait for the response.
+		 * @param sc The client's socket
+		 * @param dp Last packet sent
+		 * @return Response of the server
+		 */
+	private static DatagramPacket sendReceive(DatagramSocket sc, DatagramPacket dp) throws IOException {
 		//Send the packet to the server and
 		byte[] recMsg = new byte[516];
 		DatagramPacket rec = new DatagramPacket(recMsg,516);
+		System.out.println("Sending the packet : "+Arrays.toString(dp.getData()));
 		sc.send(dp);
 
 		//Try to receive the response from the server, if the timeout exceeded, re-sends the packet
@@ -76,6 +130,7 @@ public class TFTPClient {
 		do {
 			try{
 				sc.receive(rec);
+				System.out.println("Received a packet from the server : "+Arrays.toString(rec.getData()));
 				received=true;
 			}catch (SocketTimeoutException e){
 				System.out.println("No response from the server, re-sending the packet.");
@@ -87,19 +142,45 @@ public class TFTPClient {
 
 	// WRQ = 2
 	// 2 bytes : Opcode / string : filename / 1 byte : 0 / string : Mode / 1 byte : 0
-	private byte[] createWRQ(String fileName){
+	private static byte[] createWRQ(String fileName){
 		byte[] fileBytes = fileName.getBytes();
 		byte[] modeBytes = defaultMode.getBytes();
-		byte[] opBytes = BigInteger.valueOf(opcode.WRQ.value).toByteArray();
+		byte[] opBytes = {0, (byte) opcode.WRQ.value};
 		byte[] zeroByte =new byte[]{(byte) 0};
 		return BytesUtils.concat(BytesUtils.concat(BytesUtils.concat(BytesUtils.concat(opBytes,fileBytes), zeroByte),modeBytes),zeroByte);
+	}
 
+	// DATA
+	// 2 bytes : Opcode / 2 bytes : Block# / n bytes : Data (0 to 512 bytes)
+	private static byte[] createDATA(byte[] fileData,int blockN) {
+		byte[] opBytes = {0, (byte) opcode.DATA.value};
+		byte[] tempNumber = BigInteger.valueOf(blockN).toByteArray();
+		byte[] blockNumber;
+		if(tempNumber.length<2)
+			 blockNumber= new byte[]{0, tempNumber[0]};
+		else
+			blockNumber = tempNumber;
+		return BytesUtils.concat(BytesUtils.concat(opBytes,blockNumber), fileData);
+	}
+
+	// ACK
+	// 2 bytes : Opcode / 2 bytes : Block#
+	private static byte[] createACK(int blockN) {
+		byte[] tempNumber = BigInteger.valueOf(blockN).toByteArray();
+		byte[] blockNumber;
+		if(tempNumber.length<2)
+			blockNumber= new byte[]{0, tempNumber[0]};
+		else
+			blockNumber = tempNumber;
+		byte[] res = new byte[]{0, (byte) opcode.ACK.value};
+		return BytesUtils.concat(res,blockNumber);
 	}
 
 	/**
 	 * Receive a file from the server
 	 */
 	public void receiveFile(InetAddress serverIP,int serverPort,String fileName){}
+
 
 
 
