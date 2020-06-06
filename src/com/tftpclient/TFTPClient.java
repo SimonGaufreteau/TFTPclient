@@ -9,9 +9,6 @@ import java.util.Arrays;
  * A class representing a TFTP client. The Pumpkin server is used to test the 2 primary methods : {@link #sendFile} and {@link #receiveFile}
  */
 public class TFTPClient {
-	// ERROR
-	// 2 bytes : Opcode / 2 bytes : ErrorCode / string : ErrorMessage / 1 byte : 0
-
 	/**
 	 * Values of the opcodes used in the packets
 	 */
@@ -48,6 +45,8 @@ public class TFTPClient {
 	 * Send a file to the server
 	 */
 	public static void sendFile(InetAddress serverIP, int serverPort, String filePath) throws Exception {
+		double time = System.currentTimeMillis();
+
 		//Creating the socket for the transmission
 		DatagramSocket sc = new DatagramSocket();
 		sc.setSoTimeout(defaultTimeout);
@@ -71,6 +70,8 @@ public class TFTPClient {
 		if(resMsg[1]!=opcode.ACK.value){
 			throwError(resMsg);
 		}
+
+		//Updating the communication port (--> the server attributes a port for each communication)
 		serverPort=resPacket.getPort();
 
 		//Creating the DATA packet
@@ -93,16 +94,9 @@ public class TFTPClient {
 		//Terminating the communication
 		fs.close();
 		sc.close();
-		System.out.println("File \""+fileName+"\" sent successfully.");
+		System.out.println("File \""+fileName+"\" sent successfully in "+(System.currentTimeMillis()-time)+"ms.");
 		System.out.println("--------------------\n");
 
-	}
-
-
-
-
-	private static void throwError(byte[] resMsg) throws Exception {
-		throw new TFTPException(errors[resMsg[3]]);
 	}
 
 	public void sendFile(int serverPort,String filePath) throws Exception {
@@ -112,12 +106,12 @@ public class TFTPClient {
 		sendFile(defaultIP,defaultServerPort,filePath);
 	}
 
-		/**
-		 * Sends a packet to the server and wait for the response.
-		 * @param sc The client's socket
-		 * @param dp Last packet sent
-		 * @return Response of the server
-		 */
+	/**
+	 * Sends a packet to the server and wait for the response.
+	 * @param sc The client's socket
+	 * @param dp Last packet sent
+	 * @return Response of the server
+	 */
 	private static DatagramPacket sendReceive(DatagramSocket sc, DatagramPacket dp) throws IOException {
 		//Send the packet to the server and
 		byte[] recMsg = new byte[516];
@@ -176,10 +170,31 @@ public class TFTPClient {
 		return BytesUtils.concat(res,blockNumber);
 	}
 
+	// ERROR
+	// 2 bytes : Opcode / 2 bytes : ErrorCode / string : ErrorMessage / 1 byte : 0
+	private static byte[] createError(int errorCode) {
+		byte[] opBytes = {0, (byte) opcode.ERROR.value};
+		byte[] tempNumber = BigInteger.valueOf(errorCode).toByteArray();
+		byte[] codeByte;
+		if(tempNumber.length<2)
+			codeByte= new byte[]{0, tempNumber[0]};
+		else
+			codeByte = tempNumber;
+		byte[] zeroByte =new byte[]{(byte) 0};
+		byte[] messageByte = errors[errorCode].getBytes();
+		return BytesUtils.concat(BytesUtils.concat(BytesUtils.concat(opBytes,codeByte),messageByte),zeroByte);
+	}
+
+	private static void throwError(byte[] resMsg) throws Exception {
+		throw new TFTPException(errors[resMsg[3]]);
+	}
+
 	/**
 	 * Receive a file from the server
 	 */
-	public void receiveFile(InetAddress serverIP,int serverPort,String fileName){}
+	public void receiveFile(InetAddress serverIP,int serverPort,String fileName){
+
+	}
 
 
 
