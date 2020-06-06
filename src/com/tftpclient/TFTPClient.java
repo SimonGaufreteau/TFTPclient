@@ -18,43 +18,61 @@ public class TFTPClient {
 	}
 
 	//Error messages
-	private static String[] errors = {"Not defined, see error message (if any)","File not found.","Access violation.","Disk full or allocation exceeded.",
+	private static final String[] serverErrors = {"Not defined, see error message (if any)","File not found.","Access violation (the host may have denied your request or you don't have the right to read/write the file).","Disk full or allocation exceeded.",
 			"Illegal TFTP operation.","Unknown transfer ID.","File already exists.","No such user."};
+	private static final String[] localErrors = {"Could not create the socket","Error encountered while trying to open the file","I/O error while sending/receiving a packet",
+			"Error encountered while trying to read the file","I/O error while closing the file reader"};
 
 	//Default write mode for the strings
-	private static String defaultMode = "netascii";
+	private static final String defaultMode = "netascii";
 
 	//Default timeout value before sending the packet again : 1 min
-	private static int defaultTimeout = 60000;
+	private static final int defaultTimeout = 60000;
 
-	//Default IP adress
+	//Default IP address
 	private static InetAddress defaultIP;
 	static {
 		try {
 			defaultIP = InetAddress.getByName("localhost");
 		} catch (UnknownHostException e) {
-			e.printStackTrace();
+			System.out.println("Could not resolve the address linked to \"localhost\" ");
 		}
 	}
 
 	//Default server port
-	private static int defaultServerPort=69;
+	private static final int defaultServerPort=69;
 
 
 	/**
 	 * Send a file to the server
+	 * @return 0 if the file was sent successfully or -/+(errorCode+1) if an error occurred. Negative value : local error (see {@link TFTPClient#localErrors} for descriptions),
+	 * Positive value : server error (see {@link TFTPClient#localErrors} for descriptions).
+	 * @apiNote Either check the String array corresponding to your type of error at (+/-yourCode)-1 or use the {@link #getErrorMessage(int)} with the result of this method.
 	 */
-	public static void sendFile(InetAddress serverIP, int serverPort, String filePath) throws Exception {
+	public static int sendFile(InetAddress serverIP, int serverPort, String filePath){
 		double time = System.currentTimeMillis();
 
 		//Creating the socket for the transmission
-		DatagramSocket sc = new DatagramSocket();
-		sc.setSoTimeout(defaultTimeout);
+
+		DatagramSocket sc;
+		try {
+			sc = new DatagramSocket();
+			sc.setSoTimeout(defaultTimeout);
+		} catch (SocketException e) {
+			System.out.println(localErrors[0]);
+			return -1;
+		}
 
 		//Opening the file
 		File file = new File(filePath);
 		String fileName = file.getName();
-		FileInputStream fs = new FileInputStream(file);
+		FileInputStream fs;
+		try {
+			fs = new FileInputStream(file);
+		} catch (FileNotFoundException e) {
+			System.out.println(localErrors[1]);
+			return -2;
+		}
 
 		System.out.println("\n--------------------");
 		System.out.println("Starting TFTP request for : \""+fileName+"\"");
@@ -63,12 +81,23 @@ public class TFTPClient {
 		byte[] wrqMsg = createWRQ(fileName);
 		DatagramPacket dp = new DatagramPacket(wrqMsg,wrqMsg.length,serverIP,serverPort);
 
-		DatagramPacket resPacket = sendReceive(sc,dp);
-		byte[] resMsg = resPacket.getData();
+		DatagramPacket resPacket;
+		try {
+			resPacket = sendReceive(sc,dp);
+		} catch (IOException e) {
+			System.out.println(localErrors[2]);
+			return -3;
+		}
 
+		byte[] resMsg = resPacket.getData();
 		//Checking an error
 		if(resMsg[1]!=opcode.ACK.value){
-			throwError(resMsg);
+			try{
+				throwError(resMsg);
+			}catch (TFTPException e){
+				System.out.println(e.getMessage());
+				return resMsg[3]+1;
+			}
 		}
 
 		//Updating the communication port (--> the server attributes a port for each communication)
@@ -80,30 +109,59 @@ public class TFTPClient {
 		byte[] fileData;
 		while(dataLength==516) {
 			fileData = new byte[512];
-			dataLength = fs.read(fileData, 0, 512)+4;
+			try {
+				dataLength = fs.read(fileData, 0, 512)+4;
+			} catch (IOException e) {
+				System.out.println(localErrors[3]);
+				return -4;
+			}
 			fileData = BytesUtils.removeTrailingZeros(fileData);
 			byte[] dataMsg = createDATA(fileData, blockN);
 			System.out.println("\nSending the #" + blockN + " block of " + dataLength + " bytes");
 			blockN++;
 			dp = new DatagramPacket(dataMsg, dataLength, serverIP, serverPort);
-			resPacket = sendReceive(sc, dp);
+			try {
+				resPacket = sendReceive(sc, dp);
+			} catch (IOException e) {
+				System.out.println(localErrors[2]);
+				return -3;
+			}
 			if (resPacket.getData()[1] != opcode.ACK.value) {
-				throwError(resPacket.getData());
+				try{
+					throwError(resPacket.getData());
+				}catch (TFTPException e){
+					System.out.println(e.getMessage());
+					return resMsg[3]+1;
+				}
 			}
 		}
 		//Terminating the communication
-		fs.close();
+		try {
+			fs.close();
+		} catch (IOException e) {
+			System.out.println(localErrors[4]);
+			return -5;
+		}
 		sc.close();
 		System.out.println("File \""+fileName+"\" sent successfully in "+(System.currentTimeMillis()-time)+"ms.");
 		System.out.println("--------------------\n");
-
+		return 0;
 	}
 
-	public void sendFile(int serverPort,String filePath) throws Exception {
-		sendFile(defaultIP,serverPort,filePath);
+	/**
+	 * Works like {@link #sendFile(InetAddress, int, String)} but the address is {@link #defaultIP} i.e. the address at localhost
+	 * @see #sendFile(InetAddress, int, String)
+	 */
+	public static int sendFile(int serverPort,String filePath){
+		return sendFile(defaultIP,serverPort,filePath);
 	}
-	public static void sendFile(String filePath) throws Exception {
-		sendFile(defaultIP,defaultServerPort,filePath);
+
+	/**
+	 * Works like {@link #sendFile(InetAddress, int, String)} but the address is {@link #defaultIP} i.e. the address at localhost and the port is {@link #defaultServerPort} i.e. 69
+	 * @see #sendFile(InetAddress, int, String)
+	 */
+	public static int sendFile(String filePath){
+		return sendFile(defaultIP,defaultServerPort,filePath);
 	}
 
 	/**
@@ -181,12 +239,30 @@ public class TFTPClient {
 		else
 			codeByte = tempNumber;
 		byte[] zeroByte =new byte[]{(byte) 0};
-		byte[] messageByte = errors[errorCode].getBytes();
+		byte[] messageByte = serverErrors[errorCode].getBytes();
 		return BytesUtils.concat(BytesUtils.concat(BytesUtils.concat(opBytes,codeByte),messageByte),zeroByte);
 	}
 
-	private static void throwError(byte[] resMsg) throws Exception {
-		throw new TFTPException(errors[resMsg[3]]);
+	private static void throwError(byte[] resMsg) throws TFTPException {
+		byte[] byteMsg = new byte[resMsg.length-4];
+		System.arraycopy(resMsg,4,byteMsg,0,resMsg.length-4);
+		String errMsg = new String(byteMsg);
+		throw new TFTPException(serverErrors[resMsg[3]]+" Error message : "+errMsg);
+	}
+
+	/**
+	 * Returns the error message corresponding to the code given. This code should be a return value from the {@link #sendFile(InetAddress, int, String)} method.
+	 */
+	public static String getErrorMessage(int errorCode){
+		if(errorCode>serverErrors.length-1 || -errorCode>localErrors.length-1)
+			return "No message was found for this error code.";
+		if(errorCode==0)
+			return "No problem occurred while sending/receiving the file";
+		else if(errorCode>0){
+			return serverErrors[errorCode-1];
+		}
+		else return localErrors[-(errorCode+1)];
+
 	}
 
 	/**
