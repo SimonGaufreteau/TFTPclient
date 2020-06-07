@@ -1,6 +1,7 @@
 package com.tftpclient;
 
 import java.io.*;
+import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.net.*;
 import java.util.Arrays;
@@ -30,7 +31,7 @@ public class TFTPClient {
 	private static final String defaultMode = "netascii";
 
 	//Default timeout value before sending the packet again : 1 min
-	private static final int defaultTimeout = 60000;
+	private static final int defaultTimeout = 500;
 
 	//Default IP address
 	private static InetAddress defaultIP;
@@ -205,6 +206,16 @@ public class TFTPClient {
 		return BytesUtils.concat(BytesUtils.concat(BytesUtils.concat(BytesUtils.concat(opBytes,fileBytes), zeroByte),modeBytes),zeroByte);
 	}
 
+	// RRQ = 1
+	// 2 bytes : Opcode / string : filename / 1 byte : 0 / string : Mode / 1 byte : 0
+	private static byte[] createRRQ(String fileName) {
+		byte[] fileBytes = fileName.getBytes();
+		byte[] modeBytes = defaultMode.getBytes();
+		byte[] opBytes = {0, (byte) opcode.RRQ.value};
+		byte[] zeroByte =new byte[]{(byte) 0};
+		return BytesUtils.concat(BytesUtils.concat(BytesUtils.concat(BytesUtils.concat(opBytes,fileBytes), zeroByte),modeBytes),zeroByte);
+	}
+
 	// DATA
 	// 2 bytes : Opcode / 2 bytes : Block# / n bytes : Data (0 to 512 bytes)
 	private static byte[] createDATA(byte[] fileData,int blockN) {
@@ -271,11 +282,158 @@ public class TFTPClient {
 	/**
 	 * Receive a file from the server
 	 */
-	public void receiveFile(InetAddress serverIP,int serverPort,String fileName){
+	public static int receiveFile(InetAddress serverIP,int serverPort,String fileName){
+		double time = System.currentTimeMillis();
 
+		//Creating the socket for the transmission
+		DatagramSocket sc;
+		try {
+			sc = new DatagramSocket();
+			sc.setSoTimeout(defaultTimeout);
+		} catch (SocketException e) {
+			System.out.println(localErrors[0]);
+			return -1;
+		}
+
+		//Opening the local file
+		File file = new File("local/"+fileName);
+		int i=0;
+		String[] nameSplit = fileName.split("[.]");
+		String realName;
+		String extension=null;
+		if(nameSplit.length==0){
+			realName=fileName;
+		}
+		else if(nameSplit.length<2)
+			realName=nameSplit[0];
+		else{
+			realName=nameSplit[nameSplit.length-2];
+			extension=nameSplit[nameSplit.length-1];
+		}
+		while(file.isFile())
+			file=new File("local/"+realName+"("+(i++)+")."+extension);
+		FileOutputStream fs;
+		try {
+			fs = new FileOutputStream(file);
+		} catch (FileNotFoundException e) {
+			System.out.println(localErrors[1]);
+			return -2;
+		}
+
+		System.out.println("\n--------------------");
+		System.out.println("Starting TFTP request for : \""+fileName+"\"");
+
+		//Preparing to send the WRQ packet to the server
+		byte[] rrqMsg = createRRQ(fileName);
+		DatagramPacket dp = new DatagramPacket(rrqMsg,rrqMsg.length,serverIP,serverPort);
+
+		DatagramPacket resPacket;
+		try {
+			resPacket = sendReceive(sc,dp);
+		} catch (IOException e) {
+			System.out.println(localErrors[2]);
+			try{fs.close();}catch (Exception ignored){}
+			return -3;
+		}
+		//Checking errors
+		if (checkError(fs, resPacket)) return resPacket.getData()[3] + 1;
+
+		//Updating the communication port (--> the server attributes a port for each communication)
+		serverPort=resPacket.getPort();
+
+		//Creating the DATA packet
+		int blockN = 1;
+		boolean lastTime = false;
+		do{
+			//Writing the data to the file
+			if (writeToFile(fs, resPacket, blockN)) return -4;
+
+			//Creating an ACK for the block and sending it to the server
+			byte[] dataMsg = createACK(blockN);
+			blockN++;
+			dp = new DatagramPacket(dataMsg, dataMsg.length, serverIP, serverPort);
+			if(lastTime){
+				try {
+					sc.send(dp);
+				} catch (IOException e) {
+					System.out.println(localErrors[2]);
+					try{fs.close();}catch (Exception ignored){}
+					return -3;
+				}
+				break;
+			}
+			try {
+				resPacket = sendReceive(sc, dp);
+			} catch (IOException e) {
+				System.out.println(localErrors[2]);
+				try{fs.close();}catch (Exception ignored){}
+				return -3;
+			}
+
+			//Checking errors
+			if (checkError(fs, resPacket)) return resPacket.getData()[3] + 1;
+			if(resPacket.getLength()<516)
+				lastTime= true;
+		}while(resPacket.getLength()==516 || lastTime);
+
+		//Terminating the communication
+		try {
+			fs.close();
+		} catch (IOException e) {
+			System.out.println(localErrors[4]);
+			return -5;
+		}
+		sc.close();
+		System.out.println("File \""+fileName+"\" retrieved successfully in "+(System.currentTimeMillis()-time)+"ms.");
+		System.out.println("--------------------\n");
+		return 0;
 	}
 
+	private static boolean checkError(FileOutputStream fs, DatagramPacket resPacket) {
+		if (resPacket.getData()[1] != opcode.DATA.value) {
+			try{
+				throwError(resPacket.getData());
+			}catch (TFTPException e){
+				System.out.println(e.getMessage());
+				try{fs.close();}catch (Exception ignored){}
+				return true;
+			}
+		}
+		return false;
+	}
 
+	private static boolean writeToFile(FileOutputStream fs, DatagramPacket resPacket, int blockN) {
+		byte[] fileData;
+		fileData = getDATA(resPacket.getData());
+		System.out.println("\nWriting the #" + blockN + " block of " + fileData.length + " bytes");
+		try {
+			fs.write(fileData, 0, 512);
+		} catch (IOException e) {
+			System.out.println(localErrors[3]);
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Works like {@link #receiveFile(InetAddress, int, String)} but the address is {@link #defaultIP} i.e. the address at localhost
+	 * @see #receiveFile(InetAddress, int, String)
+	 */
+	public static int receiveFile(int serverPort,String filePath){
+		return receiveFile(defaultIP,serverPort,filePath);
+	}
+
+	/**
+	 * Works like {@link #receiveFile(InetAddress, int, String)} but the address is {@link #defaultIP} i.e. the address at localhost and the port is {@link #defaultServerPort} i.e. 69
+	 * @see #receiveFile(InetAddress, int, String)
+	 */
+	public static int receiveFile(String filePath){
+		return receiveFile(defaultIP,defaultServerPort,filePath);
+	}
+
+	private static byte[] getDATA(byte[] data) {
+		return Arrays.copyOfRange(data,4,data.length);
+	}
 
 
 }
