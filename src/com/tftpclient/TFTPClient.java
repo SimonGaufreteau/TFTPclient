@@ -32,6 +32,7 @@ public class TFTPClient {
 
 	//Default timeout value before sending the packet again : 1 min
 	private static final int defaultTimeout = 500;
+	private static final int defaultReSend = 3;
 
 	//Default IP address
 	private static InetAddress defaultIP;
@@ -183,14 +184,20 @@ public class TFTPClient {
 
 		//Try to receive the response from the server, if the timeout exceeded, re-sends the packet
 		boolean received = false;
+		int i=0;
 		do {
 			try{
 				sc.receive(rec);
 				System.out.println("Received a packet from the server : "+Arrays.toString(rec.getData()));
 				received=true;
 			}catch (SocketTimeoutException e){
+				if(i==defaultReSend){
+					System.out.println("No response received in "+defaultReSend+" tries. Cancelling the communication.");
+					throw new IOException();
+				}
 				System.out.println("No response from the server, re-sending the packet.");
 				sc.send(dp);
+				i++;
 			}
 		}while (!received);
 		return rec;
@@ -300,7 +307,7 @@ public class TFTPClient {
 		int i=0;
 		String[] nameSplit = fileName.split("[.]");
 		String realName;
-		String extension=null;
+		String extension="";
 		if(nameSplit.length==0){
 			realName=fileName;
 		}
@@ -333,17 +340,21 @@ public class TFTPClient {
 		} catch (IOException e) {
 			System.out.println(localErrors[2]);
 			try{fs.close();}catch (Exception ignored){}
+			file.delete();
 			return -3;
 		}
 		//Checking errors
-		if (checkError(fs, resPacket)) return resPacket.getData()[3] + 1;
+		if (checkError(fs, resPacket)){
+			file.delete();
+			return resPacket.getData()[3] + 1;
+		}
 
 		//Updating the communication port (--> the server attributes a port for each communication)
 		serverPort=resPacket.getPort();
 
 		//Creating the DATA packet
 		int blockN = 1;
-		boolean lastTime = false;
+		boolean lastTime = resPacket.getLength()!=516;
 		do{
 			//Writing the data to the file
 			if (writeToFile(fs, resPacket, blockN)) return -4;

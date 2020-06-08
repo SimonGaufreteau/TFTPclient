@@ -1,5 +1,7 @@
 package com.tftpclient;
 
+import org.w3c.dom.ls.LSOutput;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
@@ -83,18 +85,23 @@ public class GUITFTP extends JPanel implements ActionListener {
 			if(currentFile==null){
 				System.out.println("Please select a file to be sent first.");
 			}
-			else
-				TFTPClient.sendFile(currentFile.getPath());
+			else{
+				int err = TFTPClient.sendFile(currentFile.getPath());
+				if (err != 0) {
+					System.out.println("Error code : " + err);
+				}
+			}
 		}
 		else if(e.getSource() == receive){
-			/*if(localPath.getText().length()==0){
-				System.out.println("Please enter a local path first.");
-			}*/
 			if(toBeReceived.getText().length()==0 || toBeReceived.getText().equals("...")){
 				System.out.println("Please enter a file name first.");
 			}
-			else
-				TFTPClient.receiveFile(toBeReceived.getText());
+			else{
+				int err = TFTPClient.receiveFile(toBeReceived.getText());
+				if (err != 0) {
+					System.out.println("Error code : " + err);
+				}
+			}
 		}
 	}
 
