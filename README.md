@@ -14,7 +14,7 @@ As I used it to test this application, I recommend [Pumpkin](http://kin.klever.n
 
 ## Contributing
 
-This is a scholar project so no contributions are accepted. See [Contacts](https://github.com/SimonGaufreteau/TFTPclient/README.md/#contacts) if you have any questions
+This is a scholar project so no contributions are accepted. See [Contacts](https://github.com/SimonGaufreteau/TFTPclient#contacts) if you have any questions
 
 ## Contacts 
 
